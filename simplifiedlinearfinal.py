@@ -163,6 +163,7 @@ class ChessTempoScraper:
     def scrape_position_stats(self, fen: str) -> List[MoveStatistics]:
         try:
             board = chess.Board()  # Initialize board at the current position
+            board.set_fen(fen)
             # Wait for the table to load
             WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.ct-data-table")))
             time.sleep(2)
@@ -170,7 +171,7 @@ class ChessTempoScraper:
             result = []
             for move_san, count in stats:
                 try:
-                    # **Fix: Remove move number prefix (e.g., "1.e4" → "e4")**
+                    #Remove move number prefix (e.g., "1.e4" → "e4")
                     move_san_cleaned = re.sub(r"^\d+\.*\s*", "", move_san).strip()
                     move = board.parse_san(move_san_cleaned)  # Convert to UCI using cleaned SAN
                     move_uci = move.uci()
@@ -246,13 +247,13 @@ def play_against_bot():
                     if move in board.legal_moves:
                         board.push(move)
                         scraper.drag_and_drop_piece(move)
-                        print(board)
                     else:
                         print("Illegal move.")
                 except:
                     print("Invalid UCI format.")
             else:
                 print("Bot is thinking...")
+                print(board.fen())
                 move_stats = scraper.scrape_position_stats(board.fen())
                 # **DEBUG: Print raw scraped moves**
                 if not move_stats:
