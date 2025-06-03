@@ -28,7 +28,7 @@ class MoveStatistics:
 
 #Used to move pieces on ChessTempo
 def get_square_selector(square: str) -> str:
-    return f'div[data-square-id="{square}"]'  # Directly select square using data attribute
+    return f'div[data-square-id="{square}"]'
 
 class LinearAlgebraChessBot:
     def __init__(self):
@@ -221,9 +221,9 @@ class ChessTempoScraper:
             actions = ActionChains(self.driver)
             actions.click_and_hold(source_element).move_to_element(target_element).release().perform()
             print(f"✅ Bot moved piece from {source_square} to {target_square} on ChessTempo.")
-            time.sleep(2)  # Allow time for board update
+            time.sleep(2)  # Allow time for board to update and reflect changes
         except Exception as e:
-            print(f"❌ Failed to drag and drop piece '{move.uci()}': {e}")
+            print(f"ERROR: Failed to drag and drop piece '{move.uci()}': {e}")
 
     def close(self):
         if self.driver:
@@ -255,18 +255,15 @@ def play_against_bot():
                 print("Bot is thinking...")
                 print(board.fen())
                 move_stats = scraper.scrape_position_stats(board.fen())
-                # **DEBUG: Print raw scraped moves**
                 if not move_stats:
                     print("\n⚠️ No moves were scraped! Web scraping may have failed.")
                 else:
                     print("\n✅ Moves scraped successfully:")
-                # Compute probabilities
                 probabilities = bot.calculate_move_probabilities(board, move_stats)
-                # **DEBUG: Print probability distribution**
                 if probabilities.size == 0:
                     print("\n⚠️ No probabilities generated! Bot may have failed to process moves.")
                 else:
-                    print("\n🔢 Calculated move probabilities:")
+                    print("\nCalculated move probabilities:")
                     for stats, prob in zip(move_stats, probabilities):
                         print(f"- Move: {stats.move_san}, Probability: {prob:.3f}")
                 move = bot.select_move_linear_algebra(board, move_stats)
@@ -275,7 +272,7 @@ def play_against_bot():
                     scraper.drag_and_drop_piece(move)
                     board.push(move)
                 else:
-                    print("\n❌ Bot failed to find a valid move. Check scraper or move selection logic.")
+                    print("\ERROR: Bot failed to find a valid move. Check scraper or move selection logic.")
                     break        
         print("\n🏁 Game Over! Result:", board.result())
     finally:
