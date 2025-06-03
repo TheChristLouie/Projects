@@ -11,6 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 import re
 
 @dataclass
@@ -25,15 +26,19 @@ class MoveStatistics:
     performance_rating: int
     last_played_year: int
 
+#Used to move pieces on ChessTempo
+def get_square_selector(square: str) -> str:
+    return f'div[data-square-id="{square}"]'
+
 class LinearAlgebraChessBot:
     def __init__(self):
         self.position_database = {}
         self.weight_matrix = None
         self.feature_weights = {
-            'games_played': 0.3,
-            'performance_rating': 0.4,
-            'avg_rating': 0.2,
-            'recency': 0.1
+            'games_played': 1,
+            'performance_rating': 0,
+            'avg_rating': 0,
+            'recency': 0
         }
 
     def extract_position_features(self, board: chess.Board) -> np.ndarray:
@@ -101,7 +106,7 @@ class LinearAlgebraChessBot:
         W = self.compute_move_weights(move_stats)
         w = np.array([
             self.feature_weights['games_played'],
-            self.feature_weights['performance_rating'],
+            self.feature_weights['performance_rating'],                                                                                                                                                                                                                                
             self.feature_weights['avg_rating'],
             self.feature_weights['recency']
         ])
@@ -133,6 +138,16 @@ class ChessTempoScraper:
         self.driver = None
         self.headless = headless
         self.setup_driver()
+        self.driver.get("https://chesstempo.com/game-database/")
+        # Click the launch button to load the database page
+        try:
+            launch_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.CLASS_NAME, "ct-gdb-launch-button"))
+            )
+            launch_button.click()
+            print("Navigating to the Chess Game Database page...")
+        except Exception as e:
+            print(f"Error clicking launch button: {e}")
 
     def setup_driver(self):
         chrome_options = Options()
@@ -144,27 +159,32 @@ class ChessTempoScraper:
             self.driver = webdriver.Chrome(options=chrome_options)
         except Exception as e:
             print(f"Error setting up Chrome driver: {e}")
-
+    
     def scrape_position_stats(self, fen: str) -> List[MoveStatistics]:
         try:
-            board = chess.Board(fen)
-            self.driver.get("https://www.chesstempo.com/opening-explorer")
+            board = chess.Board()  # Initialize board at the current position
+            board.set_fen(fen)
+            # Wait for the table to load
             WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.ct-data-table")))
             time.sleep(2)
             stats = self.extract_move_stats_from_page()
             result = []
             for move_san, count in stats:
                 try:
-                    move = board.parse_san(move_san)
+                    #Remove move number prefix (e.g., "1.e4" → "e4")
+                    move_san_cleaned = re.sub(r"^\d+\.*\s*", "", move_san).strip()
+                    move = board.parse_san(move_san_cleaned)  # Convert to UCI using cleaned SAN
                     move_uci = move.uci()
-                    result.append(MoveStatistics(move_san, move_uci, count, 0.0, 0.0, 0.0, 2200, 2250, 2025))
-                except:
+                    result.append(MoveStatistics(move_san_cleaned, move_uci, count, 0.0, 0.0, 0.0, 2200, 2250, 2025))
+                except Exception as e:
+                    print(f"Error parsing SAN '{move_san}': {e}")
                     continue
-            return result
+            return(result)
         except Exception as e:
             print(f"Scrape error: {e}")
             return []
 
+    #Extract move_stats function works
     def extract_move_stats_from_page(self) -> List[Tuple[str, int]]:
         results = []
         try:
@@ -182,6 +202,29 @@ class ChessTempoScraper:
             print("Failed to extract table:", e)
         return results
 
+    def drag_and_drop_piece(self, move: chess.Move):
+        try:
+            source_square = move.uci()[:2]  # Extract source (e.g., "e2")
+            target_square = move.uci()[2:]  # Extract target (e.g., "e4")
+            source_selector = f'div[data-square-id="{source_square}"]'
+            target_selector = f'div[data-square-id="{target_square}"]'
+            print(f"🔍 Checking source square: {source_selector}")
+            print(f"🔍 Checking target square: {target_selector}")
+            source_element = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, source_selector))
+            )
+            target_element = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, target_selector))
+            )
+            print(f"✅ Found source square {source_square} and target square {target_square}")
+            # Perform drag-and-drop action
+            actions = ActionChains(self.driver)
+            actions.click_and_hold(source_element).move_to_element(target_element).release().perform()
+            print(f"✅ Bot moved piece from {source_square} to {target_square} on ChessTempo.")
+            time.sleep(2)  # Allow time for board to update and reflect changes
+        except Exception as e:
+            print(f"ERROR: Failed to drag and drop piece '{move.uci()}': {e}")
+
     def close(self):
         if self.driver:
             self.driver.quit()
@@ -196,27 +239,42 @@ def play_against_bot():
             print("\n" + "-" * 60)
             print(board)
             print(f"Turn: {'White' if board.turn else 'Black'}")
+
             if (board.turn == chess.WHITE and user_is_white) or (board.turn == chess.BLACK and not user_is_white):
                 user_input = input("Your move (in UCI, e.g. e2e4): ").strip()
                 try:
                     move = chess.Move.from_uci(user_input)
                     if move in board.legal_moves:
                         board.push(move)
+                        scraper.drag_and_drop_piece(move)
                     else:
                         print("Illegal move.")
                 except:
                     print("Invalid UCI format.")
             else:
                 print("Bot is thinking...")
+                print(board.fen())
                 move_stats = scraper.scrape_position_stats(board.fen())
+                if not move_stats:
+                    print("\n⚠️ No moves were scraped! Web scraping may have failed.")
+                else:
+                    print("\n✅ Moves scraped successfully:")
+                probabilities = bot.calculate_move_probabilities(board, move_stats)
+                if probabilities.size == 0:
+                    print("\n⚠️ No probabilities generated! Bot may have failed to process moves.")
+                else:
+                    print("\nCalculated move probabilities:")
+                    for stats, prob in zip(move_stats, probabilities):
+                        print(f"- Move: {stats.move_san}, Probability: {prob:.3f}")
                 move = bot.select_move_linear_algebra(board, move_stats)
                 if move and move in board.legal_moves:
-                    print(f"Bot plays: {board.san(move)}")
+                    print(f"\n🤖 Bot plays: {board.san(move)}")
+                    scraper.drag_and_drop_piece(move)
                     board.push(move)
                 else:
-                    print("Bot failed to find a valid move.")
-                    break
-        print("\nGame Over! Result:", board.result())
+                    print("\ERROR: Bot failed to find a valid move. Check scraper or move selection logic.")
+                    break        
+        print("\n🏁 Game Over! Result:", board.result())
     finally:
         scraper.close()
 
